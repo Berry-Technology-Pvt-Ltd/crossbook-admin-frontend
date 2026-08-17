@@ -5,33 +5,93 @@ import { useQuery } from "@tanstack/react-query";
 import { adminClient } from "../../core/api/adminClient";
 import AdminSidebar from "../../shared/components/AdminSidebar";
 import {
-  FileText,
   Search,
   Loader2,
   AlertTriangle,
-  Building2,
   RefreshCw,
+  Building2,
   User,
   ShieldAlert,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  Code,
 } from "lucide-react";
 
-const fetchAuditLogs = async (search, page) => {
+// API Fetchers
+const fetchAuditLogs = async (tenantId, action, page) => {
   const res = await adminClient.get("/admin/audit-logs", {
-    params: { search, page, limit: 15 },
+    params: {
+      tenantId: tenantId || undefined,
+      action: action || undefined,
+      page,
+      limit: 15,
+    },
+  });
+  return res.data?.data || res.data;
+};
+
+const fetchTenants = async () => {
+  const res = await adminClient.get("/admin/tenants", {
+    params: { limit: 100 },
   });
   return res.data?.data || res.data;
 };
 
 export default function AuditLogsPage() {
-  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTenant, setSelectedTenant] = useState("");
+  const [selectedAction, setSelectedAction] = useState("");
   const [page, setPage] = useState(1);
+  const [expandedLogId, setExpandedLogId] = useState(null);
 
+  // 1. Fetch Audit Logs Query
   const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
-    queryKey: ["admin-audit-logs", searchTerm, page],
-    queryFn: () => fetchAuditLogs(searchTerm, page),
+    queryKey: ["admin-audit-logs", selectedTenant, selectedAction, page],
+    queryFn: () => fetchAuditLogs(selectedTenant, selectedAction, page),
   });
 
-  const logList = data?.logs || (Array.isArray(data) ? data : []);
+  // 2. Fetch Tenants for Filter Dropdown
+  const { data: tenantsData } = useQuery({
+    queryKey: ["admin-tenants-lookup"],
+    queryFn: fetchTenants,
+  });
+
+  const rawLogs =
+    data?.logs || data?.data?.logs || (Array.isArray(data) ? data : []);
+  const logsList = Array.isArray(rawLogs) ? rawLogs : [];
+
+  const pagination = data?.pagination ||
+    data?.data?.pagination || {
+      total: logsList.length,
+      page: 1,
+      totalPages: 1,
+    };
+
+  const rawTenants =
+    tenantsData?.tenants ||
+    tenantsData?.data?.tenants ||
+    (Array.isArray(tenantsData) ? tenantsData : []);
+  const tenantList = Array.isArray(rawTenants) ? rawTenants : [];
+
+  const formatActionName = (action) => {
+    return String(action || "UNKNOWN_ACTION").replace(/_/g, " ");
+  };
+
+  const getActionBadgeColor = (action = "") => {
+    const act = String(action).toUpperCase();
+    if (act.includes("CREATE") || act.includes("ASSIGN"))
+      return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+    if (
+      act.includes("REVOKE") ||
+      act.includes("DELETE") ||
+      act.includes("DEACTIVAT") ||
+      act.includes("SUSPEND")
+    )
+      return "text-rose-400 bg-rose-500/10 border-rose-500/20";
+    if (act.includes("UPDATE") || act.includes("STATUS"))
+      return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    return "text-purple-400 bg-purple-500/10 border-purple-500/20";
+  };
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
@@ -61,24 +121,57 @@ export default function AuditLogsPage() {
           </button>
         </div>
 
-        {/* Search Bar */}
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div className="relative flex-1 max-w-md">
+        {/* Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="relative">
+            <select
+              value={selectedTenant}
+              onChange={(e) => {
+                setSelectedTenant(e.target.value);
+                setPage(1);
+              }}
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 text-xs font-semibold text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer appearance-none"
+            >
+              <option value="">All Organizations / Tenants</option>
+              {tenantList.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.companyName || t.id}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative">
             <Search
               className="absolute left-4 top-3.5 text-slate-500"
-              size={18}
+              size={16}
             />
             <input
               type="text"
-              placeholder="Filter audit logs by action or log ID..."
-              value={searchTerm}
+              placeholder="Filter by action (e.g. USER_CREATED)..."
+              value={selectedAction}
               onChange={(e) => {
-                setSearchTerm(e.target.value);
+                setSelectedAction(e.target.value);
                 setPage(1);
               }}
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 pl-11 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors"
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 pl-10 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
             />
           </div>
+
+          {(selectedTenant || selectedAction) && (
+            <div className="flex items-center">
+              <button
+                onClick={() => {
+                  setSelectedTenant("");
+                  setSelectedAction("");
+                  setPage(1);
+                }}
+                className="px-4 py-2.5 text-xs font-bold text-slate-400 hover:text-white bg-slate-900 border border-slate-800 rounded-xl cursor-pointer"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Data Viewport */}
@@ -102,57 +195,123 @@ export default function AuditLogsPage() {
                   <th className="p-4 pl-6">Action / Event</th>
                   <th className="p-4">Organization</th>
                   <th className="p-4">Executed By</th>
-                  <th className="p-4">Metadata Payload</th>
+                  <th className="p-4">Timestamp</th>
+                  <th className="p-4 text-right pr-6">Metadata</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 text-sm">
-                {logList.length === 0 ? (
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {logsList.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500">
-                      No system audit logs recorded.
+                    <td colSpan={5} className="p-8 text-center text-slate-500">
+                      No system audit logs recorded or matching filters.
                     </td>
                   </tr>
                 ) : (
-                  logList.map((log) => (
-                    <tr
-                      key={log.id}
-                      className="hover:bg-slate-800/30 transition-colors"
-                    >
-                      <td className="p-4 pl-6 font-bold text-white flex items-center gap-3">
-                        <div className="w-10 h-10 bg-amber-600/10 border border-amber-500/20 rounded-xl flex items-center justify-center text-amber-400 flex-shrink-0">
-                          <ShieldAlert size={18} />
-                        </div>
-                        <div className="min-w-0">
-                          <span className="px-2.5 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[11px] font-mono font-bold rounded-lg uppercase">
-                            {log.action}
+                  logsList.map((log) => {
+                    const isExpanded = expandedLogId === log.id;
+                    const meta = log.metadata || {};
+                    const actor =
+                      meta.performedBy || log.user?.email || "System Engine";
+
+                    return (
+                      <tr
+                        key={log.id}
+                        className="hover:bg-slate-800/30 transition-colors"
+                      >
+                        <td className="p-4 pl-6 font-bold text-white">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getActionBadgeColor(
+                              log.action,
+                            )}`}
+                          >
+                            <ShieldAlert size={12} />
+                            {formatActionName(log.action)}
                           </span>
-                          <div className="text-[10px] text-slate-500 font-normal font-mono mt-1 truncate">
-                            {log.id}
+                        </td>
+                        <td className="p-4 font-semibold text-slate-300">
+                          <div className="flex items-center gap-1.5">
+                            <Building2
+                              size={13}
+                              className="text-purple-400 flex-shrink-0"
+                            />
+                            <span className="truncate">
+                              {log.tenant?.companyName ||
+                                (log.tenantId
+                                  ? `Tenant #${log.tenantId.slice(0, 8)}`
+                                  : "Platform Global")}
+                            </span>
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs text-slate-300">
-                        <div className="flex items-center gap-1.5 font-semibold text-slate-300">
-                          <Building2 size={14} className="text-slate-500" />
-                          {log.tenant?.companyName || "Global Scope"}
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs text-slate-300">
-                        <div className="flex items-center gap-1.5 text-slate-300">
-                          <User size={14} className="text-slate-500" />
-                          {log.user?.email ||
-                            log.metadata?.performedBy ||
-                            "System Event"}
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs font-mono text-slate-400 max-w-xs truncate">
-                        {log.metadata ? JSON.stringify(log.metadata) : "—"}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="p-4 text-slate-300 font-mono text-[11px]">
+                          <div className="flex items-center gap-1.5">
+                            <User size={12} className="text-slate-500" />
+                            <span>{actor}</span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-slate-400 font-mono text-[11px]">
+                          <div className="flex items-center gap-1.5">
+                            <Clock size={12} className="text-slate-500" />
+                            <span>
+                              {log.createdAt
+                                ? new Date(log.createdAt).toLocaleString()
+                                : "N/A"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-right pr-6">
+                          <div className="flex flex-col items-end gap-2">
+                            <button
+                              onClick={() =>
+                                setExpandedLogId(isExpanded ? null : log.id)
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-950 border border-slate-800 hover:border-purple-500/40 text-slate-400 hover:text-white rounded-lg text-[10px] font-mono cursor-pointer transition-all"
+                            >
+                              <Code size={11} />{" "}
+                              {isExpanded ? "Hide JSON" : "Inspect JSON"}
+                            </button>
+                            {isExpanded && (
+                              <div className="text-left bg-slate-950 border border-slate-800 p-3 rounded-xl mt-2 w-full max-w-xs overflow-x-auto">
+                                <pre className="text-[10px] text-purple-300 font-mono">
+                                  {JSON.stringify(meta, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
+
+            {/* Pagination Controls */}
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between p-4 px-6 border-t border-slate-800 bg-slate-950/40 text-xs text-slate-400">
+                <span>
+                  Page {pagination.page} of {pagination.totalPages} (
+                  {pagination.total} total)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={pagination.page <= 1}
+                    className="p-2 bg-slate-900 border border-slate-800 rounded-xl disabled:opacity-30 hover:text-white cursor-pointer"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button
+                    onClick={() =>
+                      setPage((p) => Math.min(pagination.totalPages, p + 1))
+                    }
+                    disabled={pagination.page >= pagination.totalPages}
+                    className="p-2 bg-slate-900 border border-slate-800 rounded-xl disabled:opacity-30 hover:text-white cursor-pointer"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
