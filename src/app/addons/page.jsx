@@ -2,8 +2,16 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getGlobalAddons, createAddon } from "../../core/api/addonService";
+import {
+  getGlobalAddons,
+  createAddon,
+  assignTenantEntitlement,
+  updateTenantEntitlement,
+  revokeTenantEntitlement,
+} from "../../core/api/addonService";
+import { getTenants } from "../../core/api/tenantService";
 import AdminSidebar from "../../shared/components/AdminSidebar";
+import RenewModal from "../../shared/components/RenewModal";
 import {
   PackageCheck,
   Layers,
@@ -14,25 +22,46 @@ import {
   CheckCircle2,
   Plus,
   X,
+  Building2,
+  SlidersHorizontal,
+  History,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AddonsHubPage() {
   const queryClient = useQueryClient();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [selectedAddonForManage, setSelectedAddonForManage] = useState(null);
+  const [renewTarget, setRenewTarget] = useState(null);
+
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
     description: "",
   });
 
-  // 1. Fetch Addons Query
+  const [assignForm, setAssignForm] = useState({
+    tenantId: "",
+  });
+
+  // 1. Fetch Global Addons Query
   const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
     queryKey: ["admin-addons"],
     queryFn: () => getGlobalAddons(),
   });
 
-  // 2. Create Addon Mutation
+  // 2. Fetch Tenants List for Entitlement Assignment
+  const { data: tenantsData } = useQuery({
+    queryKey: ["admin-tenants-list"],
+    queryFn: () => getTenants({ limit: 100 }),
+  });
+
+  const rawTenantList =
+    tenantsData?.data?.tenants || tenantsData?.tenants || tenantsData || [];
+  const tenantList = Array.isArray(rawTenantList) ? rawTenantList : [];
+
+  // 3. Create Addon Mutation
   const createAddonMutation = useMutation({
     mutationFn: createAddon,
     onSuccess: () => {
@@ -45,6 +74,47 @@ export default function AddonsHubPage() {
       toast.error("Failed to create addon", {
         description: err.message,
       });
+    },
+  });
+
+  // 4. Assign Entitlement Mutation
+  const assignMutation = useMutation({
+    mutationFn: ({ tenantId, addonSlug }) =>
+      assignTenantEntitlement(tenantId, addonSlug),
+    onSuccess: () => {
+      toast.success("Addon entitlement assigned successfully!");
+      setAssignForm({ tenantId: "" });
+      queryClient.invalidateQueries(["admin-addons"]);
+    },
+    onError: (err) => {
+      toast.error("Failed to assign entitlement", { description: err.message });
+    },
+  });
+
+  // 5. Renew / Update Entitlement Mutation
+  const renewEntitlementMutation = useMutation({
+    mutationFn: ({ tenantId, addonSlug, status, validUntil }) =>
+      updateTenantEntitlement(tenantId, { addonSlug, status, validUntil }),
+    onSuccess: () => {
+      toast.success("Addon entitlement renewed successfully!");
+      setRenewTarget(null);
+      queryClient.invalidateQueries(["admin-addons"]);
+    },
+    onError: (err) => {
+      toast.error("Failed to renew entitlement", { description: err.message });
+    },
+  });
+
+  // 6. Revoke Entitlement Mutation
+  const revokeMutation = useMutation({
+    mutationFn: ({ tenantId, addonSlug }) =>
+      revokeTenantEntitlement(tenantId, addonSlug),
+    onSuccess: () => {
+      toast.success("Addon entitlement revoked successfully!");
+      queryClient.invalidateQueries(["admin-addons"]);
+    },
+    onError: (err) => {
+      toast.error("Failed to revoke entitlement", { description: err.message });
     },
   });
 
@@ -76,6 +146,15 @@ export default function AddonsHubPage() {
       slug:
         prev.slug === "" || prev.slug === slug.slice(0, -1) ? slug : prev.slug,
     }));
+  };
+
+  const handleAssignSubmit = (e) => {
+    e.preventDefault();
+    if (!assignForm.tenantId || !selectedAddonForManage) return;
+    assignMutation.mutate({
+      tenantId: assignForm.tenantId,
+      addonSlug: selectedAddonForManage.slug,
+    });
   };
 
   return (
@@ -134,7 +213,10 @@ export default function AddonsHubPage() {
             ) : (
               addonList.map((addon) => {
                 const totalLinked =
-                  addon._count?.entitlements || addon.entitlementsCount || 0;
+                  addon._count?.entitlements ||
+                  addon.entitlementsCount ||
+                  addon.entitlements?.length ||
+                  0;
                 const activeCount =
                   addon.activeEntitlementsCount ?? totalLinked;
                 const expiredCount = addon.expiredEntitlementsCount || 0;
@@ -163,34 +245,222 @@ export default function AddonsHubPage() {
                       </p>
                     </div>
 
-                    {/* Subscription & Entitlement Telemetry Footer */}
-                    <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 font-semibold text-slate-400">
-                        <Layers size={14} className="text-slate-500" />
-                        <span>
-                          Total Linked:{" "}
-                          <strong className="text-white">{totalLinked}</strong>
-                        </span>
-                      </div>
-
-                      {/* Dynamic Status Breakdown Badges */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
-                          <CheckCircle2 size={11} /> {activeCount} Active
-                        </span>
-
-                        {expiredCount > 0 && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-md">
-                            <Clock size={11} /> {expiredCount} Expired
+                    <div>
+                      {/* Subscription & Entitlement Telemetry Footer */}
+                      <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs mb-4">
+                        <div className="flex items-center gap-1.5 font-semibold text-slate-400">
+                          <Layers size={14} className="text-slate-500" />
+                          <span>
+                            Total Linked:{" "}
+                            <strong className="text-white">
+                              {totalLinked}
+                            </strong>
                           </span>
-                        )}
+                        </div>
+
+                        {/* Dynamic Status Breakdown Badges */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                            <CheckCircle2 size={11} /> {activeCount} Active
+                          </span>
+
+                          {expiredCount > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-md">
+                              <Clock size={11} /> {expiredCount} Expired
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Manage Entitlements Button */}
+                      <button
+                        onClick={() => setSelectedAddonForManage(addon)}
+                        className="w-full py-2.5 bg-slate-950 hover:bg-purple-600/10 border border-slate-800 hover:border-purple-500/40 text-purple-400 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <SlidersHorizontal size={14} />
+                        Manage Tenant Entitlements
+                      </button>
                     </div>
                   </div>
                 );
               })
             )}
           </div>
+        )}
+
+        {/* Manage Entitlements Modal */}
+        {selectedAddonForManage && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase italic">
+                    {selectedAddonForManage.name} - Entitlements
+                  </h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mt-0.5">
+                    Assign, Renew, and Revoke Access for Tenants
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedAddonForManage(null)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Assign Form */}
+              <form
+                onSubmit={handleAssignSubmit}
+                className="flex gap-3 mb-6 p-4 bg-slate-950 rounded-2xl border border-slate-800"
+              >
+                <select
+                  value={assignForm.tenantId}
+                  onChange={(e) => setAssignForm({ tenantId: e.target.value })}
+                  required
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                >
+                  <option value="">
+                    Select Tenant Organization to Assign...
+                  </option>
+                  {tenantList.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.companyName} ({t.id.slice(0, 8)}...)
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={assignMutation.isPending || !assignForm.tenantId}
+                  className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-lg shadow-purple-600/30"
+                >
+                  {assignMutation.isPending ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Plus size={13} />
+                  )}
+                  Assign
+                </button>
+              </form>
+
+              {/* Entitlements Table */}
+              <div className="flex-1 overflow-y-auto border border-slate-800 rounded-2xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-950/60 text-[10px] font-black uppercase text-slate-400">
+                      <th className="p-3 pl-4">Tenant</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Valid Until</th>
+                      <th className="p-3 text-right pr-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                    {!selectedAddonForManage.entitlements ||
+                    selectedAddonForManage.entitlements.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="p-6 text-center text-slate-500"
+                        >
+                          No tenant organizations actively linked to this addon.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedAddonForManage.entitlements.map((ent) => {
+                        const isExpired =
+                          ent.status === "EXPIRED" ||
+                          (ent.validUntil &&
+                            new Date(ent.validUntil) < new Date());
+                        return (
+                          <tr
+                            key={ent.id || ent.tenantId}
+                            className="hover:bg-slate-800/30"
+                          >
+                            <td className="p-3 pl-4 font-bold text-white flex items-center gap-2">
+                              <Building2
+                                size={14}
+                                className="text-purple-400"
+                              />
+                              <span>
+                                {ent.tenant?.companyName || ent.tenantId}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              {isExpired ? (
+                                <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded text-[10px]">
+                                  EXPIRED
+                                </span>
+                              ) : (
+                                <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px]">
+                                  ACTIVE
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-slate-400">
+                              {ent.validUntil
+                                ? new Date(ent.validUntil).toLocaleDateString()
+                                : "Unlimited"}
+                            </td>
+                            <td className="p-3 text-right pr-4">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() =>
+                                    setRenewTarget({
+                                      tenantId: ent.tenantId,
+                                      addonSlug: selectedAddonForManage.slug,
+                                      tenantName:
+                                        ent.tenant?.companyName || "Tenant",
+                                    })
+                                  }
+                                  className="px-2.5 py-1 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg font-bold flex items-center gap-1 cursor-pointer"
+                                  title="Renew Entitlement Expiry"
+                                >
+                                  <History size={11} /> Renew
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    revokeMutation.mutate({
+                                      tenantId: ent.tenantId,
+                                      addonSlug: selectedAddonForManage.slug,
+                                    })
+                                  }
+                                  disabled={revokeMutation.isPending}
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg cursor-pointer"
+                                  title="Revoke Entitlement"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Entitlement Renew Modal */}
+        {renewTarget && (
+          <RenewModal
+            isOpen={!!renewTarget}
+            onClose={() => setRenewTarget(null)}
+            targetName={`${renewTarget.tenantName} (${renewTarget.addonSlug})`}
+            title="Renew Addon Entitlement"
+            subtitle="Extend entitlement expiration period for"
+            isLoading={renewEntitlementMutation.isPending}
+            onConfirm={({ status, validUntil }) =>
+              renewEntitlementMutation.mutate({
+                tenantId: renewTarget.tenantId,
+                addonSlug: renewTarget.addonSlug,
+                status,
+                validUntil,
+              })
+            }
+          />
         )}
 
         {/* Create Addon Modal */}

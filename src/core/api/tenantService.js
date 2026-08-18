@@ -15,10 +15,19 @@ export const createTenant = async (data) => {
   return response.data;
 };
 
-export const updateTenantStatus = async (id, status) => {
-  const response = await adminClient.patch(`/admin/tenants/${id}/status`, {
-    status,
-  });
+// 🎯 Status සහ Renewal Date එක update කිරීම
+export const updateTenantStatus = async (
+  id,
+  status,
+  validUntil = undefined,
+) => {
+  const payload = { status };
+  if (validUntil) payload.validUntil = validUntil;
+
+  const response = await adminClient.patch(
+    `/admin/tenants/${id}/status`,
+    payload,
+  );
   return response.data;
 };
 

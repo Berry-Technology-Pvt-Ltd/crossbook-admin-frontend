@@ -13,9 +13,19 @@ export const createAddon = async (data) => {
 export const assignTenantEntitlement = async (tenantId, addonSlug) => {
   const response = await adminClient.post(
     `/admin/addons/tenants/${tenantId}/entitlements`,
-    {
-      addonSlug,
-    },
+    { addonSlug },
+  );
+  return response.data;
+};
+
+// 🎯 Addon Entitlement Renewal & Status Update
+export const updateTenantEntitlement = async (
+  tenantId,
+  { addonSlug, status, validUntil },
+) => {
+  const response = await adminClient.put(
+    `/admin/addons/tenants/${tenantId}/entitlements`,
+    { addonSlug, status, validUntil },
   );
   return response.data;
 };

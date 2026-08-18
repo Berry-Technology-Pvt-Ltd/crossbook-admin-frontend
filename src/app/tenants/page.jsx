@@ -10,6 +10,7 @@ import {
   offboardTenant,
 } from "../../core/api/tenantService";
 import AdminSidebar from "../../shared/components/AdminSidebar";
+import RenewModal from "../../shared/components/RenewModal";
 import {
   Building2,
   Search,
@@ -27,6 +28,7 @@ import {
   ChevronRight,
   ExternalLink,
   X,
+  History,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,6 +40,7 @@ export default function TenantHubPage() {
   const [page, setPage] = useState(1);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [offboardTarget, setOffboardTarget] = useState(null);
+  const [renewTarget, setRenewTarget] = useState(null);
 
   // New Tenant Form State (with Optional validUntil)
   const [formData, setFormData] = useState({
@@ -99,7 +102,23 @@ export default function TenantHubPage() {
     },
   });
 
-  // 4. Safe Soft-Delete Offboarding Mutation
+  // 4. Renewal Mutation (Status + Future validUntil)
+  const renewTenantMutation = useMutation({
+    mutationFn: ({ id, status, validUntil }) =>
+      updateTenantStatus(id, status, validUntil),
+    onSuccess: () => {
+      toast.success("Tenant subscription renewed successfully!");
+      setRenewTarget(null);
+      queryClient.invalidateQueries(["admin-tenants"]);
+    },
+    onError: (err) => {
+      toast.error("Failed to renew tenant subscription", {
+        description: err.message,
+      });
+    },
+  });
+
+  // 5. Safe Soft-Delete Offboarding Mutation
   const offboardMutation = useMutation({
     mutationFn: (id) => offboardTenant(id),
     onSuccess: () => {
@@ -309,6 +328,17 @@ export default function TenantHubPage() {
                         {/* Dynamic Action Buttons */}
                         <td className="p-4 text-right pr-6">
                           <div className="flex items-center justify-end gap-2">
+                            {/* Renew Subscription Action */}
+                            <button
+                              onClick={() => setRenewTarget(tenant)}
+                              className="px-3 py-1.5 text-xs font-bold rounded-xl transition-all border cursor-pointer bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20 flex items-center gap-1.5"
+                              title="Renew / Extend Subscription"
+                            >
+                              <History size={13} />
+                              Renew
+                            </button>
+
+                            {/* Suspend / Activate Toggle */}
                             <button
                               onClick={() =>
                                 toggleStatusMutation.mutate({
@@ -328,6 +358,7 @@ export default function TenantHubPage() {
                               {isSuspended ? "Activate" : "Suspend"}
                             </button>
 
+                            {/* Offboard Action */}
                             <button
                               onClick={() => setOffboardTarget(tenant)}
                               className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-all cursor-pointer"
@@ -372,6 +403,25 @@ export default function TenantHubPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Renew Tenant Subscription Modal */}
+        {renewTarget && (
+          <RenewModal
+            isOpen={!!renewTarget}
+            onClose={() => setRenewTarget(null)}
+            targetName={renewTarget.companyName}
+            title="Renew Tenant Subscription"
+            subtitle="Extend subscription expiration date and state for organization"
+            isLoading={renewTenantMutation.isPending}
+            onConfirm={({ status, validUntil }) =>
+              renewTenantMutation.mutate({
+                id: renewTarget.id,
+                status,
+                validUntil,
+              })
+            }
+          />
         )}
 
         {/* Provision Tenant Modal */}
