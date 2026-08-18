@@ -13,6 +13,7 @@ import {
   revokeTenantEntitlement,
 } from "../../../core/api/addonService";
 import { createTenantUser } from "../../../core/api/userService";
+import { adminClient } from "../../../core/api/adminClient";
 import AdminSidebar from "../../../shared/components/AdminSidebar";
 import {
   Building2,
@@ -29,8 +30,25 @@ import {
   X,
   UserPlus,
   Shield,
+  ShieldAlert,
+  FileSpreadsheet,
+  CheckSquare,
+  Activity,
+  Code,
 } from "lucide-react";
 import { toast } from "sonner";
+
+// Scoped Polymorphic Audit Fetcher
+const fetchTenantAuditLogs = async (tenantId, module) => {
+  const res = await adminClient.get("/admin/audit-logs", {
+    params: {
+      tenantId,
+      module,
+      limit: 20,
+    },
+  });
+  return res.data?.data || res.data;
+};
 
 export default function TenantDetailPage() {
   const { id } = useParams();
@@ -38,6 +56,9 @@ export default function TenantDetailPage() {
   const queryClient = useQueryClient();
 
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [activeAuditTab, setActiveAuditTab] = useState("PLATFORM"); // 'PLATFORM' | 'VOUCHER' | 'CHECK'
+  const [expandedLogId, setExpandedLogId] = useState(null);
+
   const [userFormData, setUserFormData] = useState({
     email: "",
     fullName: "",
@@ -65,6 +86,18 @@ export default function TenantDetailPage() {
     queryFn: () => getGlobalAddons(),
   });
 
+  // 3. Fetch Scoped Audit Logs for Current Selected Tab
+  const {
+    data: scopedAuditData,
+    isLoading: isAuditLoading,
+    refetch: refetchAuditLogs,
+    isRefetching: isAuditRefetching,
+  } = useQuery({
+    queryKey: ["admin-tenant-audit-scoped", id, activeAuditTab],
+    queryFn: () => fetchTenantAuditLogs(id, activeAuditTab),
+    enabled: !!id,
+  });
+
   // Safe Data Normalization
   const tenant =
     tenantResponse?.data?.tenant ||
@@ -72,7 +105,6 @@ export default function TenantDetailPage() {
     tenantResponse ||
     {};
 
-  // Supports { success: true, addons: [...] }, { data: { addons: [...] } }, or array
   const rawAddons =
     addonsResponse?.addons ||
     addonsResponse?.data?.addons ||
@@ -81,7 +113,6 @@ export default function TenantDetailPage() {
     [];
   const globalAddons = Array.isArray(rawAddons) ? rawAddons : [];
 
-  // Support both 'voucherSequences' and 'sequences' keys safely from backend
   const sequences = Array.isArray(tenant?.voucherSequences)
     ? tenant.voucherSequences
     : Array.isArray(tenant?.sequences)
@@ -95,25 +126,32 @@ export default function TenantDetailPage() {
       ? tenant.addons
       : [];
 
-  // 3. Status Toggle Mutation
+  const rawAuditLogs =
+    scopedAuditData?.logs ||
+    scopedAuditData?.data?.logs ||
+    (Array.isArray(scopedAuditData) ? scopedAuditData : []);
+  const auditLogsList = Array.isArray(rawAuditLogs) ? rawAuditLogs : [];
+
+  // Mutations
   const toggleStatusMutation = useMutation({
     mutationFn: (nextStatus) => updateTenantStatus(id, nextStatus),
     onSuccess: () => {
       toast.success("Tenant status updated successfully");
       queryClient.invalidateQueries(["admin-tenant-detail", id]);
       queryClient.invalidateQueries(["admin-tenants"]);
+      refetchAuditLogs();
     },
     onError: (err) => {
       toast.error("Failed to update status", { description: err.message });
     },
   });
 
-  // 4. Entitlement Toggle Mutations (Assign / Revoke)
   const assignAddonMutation = useMutation({
     mutationFn: (slug) => assignTenantEntitlement(id, slug),
     onSuccess: () => {
       toast.success("Addon assigned successfully");
       queryClient.invalidateQueries(["admin-tenant-detail", id]);
+      refetchAuditLogs();
     },
     onError: (err) => {
       toast.error("Failed to assign addon", { description: err.message });
@@ -125,13 +163,13 @@ export default function TenantDetailPage() {
     onSuccess: () => {
       toast.success("Addon revoked successfully");
       queryClient.invalidateQueries(["admin-tenant-detail", id]);
+      refetchAuditLogs();
     },
     onError: (err) => {
       toast.error("Failed to revoke addon", { description: err.message });
     },
   });
 
-  // 5. Scoped User Provisioning Mutation
   const createUserMutation = useMutation({
     mutationFn: (payload) => createTenantUser({ ...payload, tenantId: id }),
     onSuccess: () => {
@@ -144,6 +182,7 @@ export default function TenantDetailPage() {
         password: "",
       });
       queryClient.invalidateQueries(["admin-tenant-detail", id]);
+      refetchAuditLogs();
     },
     onError: (err) => {
       toast.error("Failed to provision user", { description: err.message });
@@ -174,6 +213,32 @@ export default function TenantDetailPage() {
     });
   };
 
+  const getActionBadgeColor = (action = "") => {
+    const act = String(action).toUpperCase();
+    if (
+      act.includes("CREATE") ||
+      act.includes("ASSIGN") ||
+      act.includes("ENABLED") ||
+      act.includes("APPROVED")
+    )
+      return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+    if (
+      act.includes("REVOKE") ||
+      act.includes("DELETE") ||
+      act.includes("DEACTIVAT") ||
+      act.includes("SUSPEND") ||
+      act.includes("VOID")
+    )
+      return "text-rose-400 bg-rose-500/10 border-rose-500/20";
+    if (
+      act.includes("UPDATE") ||
+      act.includes("STATUS") ||
+      act.includes("LOCKED")
+    )
+      return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    return "text-purple-400 bg-purple-500/10 border-purple-500/20";
+  };
+
   if (isTenantLoading) {
     return (
       <div className="flex min-h-screen bg-slate-950 text-slate-100">
@@ -192,7 +257,7 @@ export default function TenantDetailPage() {
         <main className="flex-1 p-10">
           <button
             onClick={() => router.push("/tenants")}
-            className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 text-xs font-bold uppercase tracking-wider"
+            className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 text-xs font-bold uppercase tracking-wider cursor-pointer"
           >
             <ArrowLeft size={16} /> Back to Tenants Hub
           </button>
@@ -460,7 +525,7 @@ export default function TenantDetailPage() {
         </div>
 
         {/* Scoped Users Section */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-xl">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
             <div className="flex items-center gap-3 text-purple-400">
               <Users size={20} />
@@ -551,6 +616,141 @@ export default function TenantDetailPage() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* 🏛️ ENTERPRISE SCOPED AUDIT SUB-LEDGERS */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-4 mb-6">
+            <div className="flex items-center gap-3 text-purple-400">
+              <ShieldAlert size={20} />
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                  Scoped Audit & Module Ledgers
+                </h3>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Forensic audit trail strictly bound to this organization
+                </p>
+              </div>
+            </div>
+
+            {/* Module Switcher Tabs */}
+            <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+              <button
+                onClick={() => {
+                  setActiveAuditTab("PLATFORM");
+                  setExpandedLogId(null);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeAuditTab === "PLATFORM"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Activity size={13} /> Platform
+              </button>
+              <button
+                onClick={() => {
+                  setActiveAuditTab("VOUCHER");
+                  setExpandedLogId(null);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeAuditTab === "VOUCHER"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <FileSpreadsheet size={13} /> Voucher Ledger
+              </button>
+              <button
+                onClick={() => {
+                  setActiveAuditTab("CHECK");
+                  setExpandedLogId(null);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeAuditTab === "CHECK"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <CheckSquare size={13} /> Check Ledger
+              </button>
+            </div>
+          </div>
+
+          {/* Audit Logs Table */}
+          {isAuditLoading || isAuditRefetching ? (
+            <div className="flex h-44 items-center justify-center text-purple-400">
+              <Loader2 className="animate-spin" size={26} />
+            </div>
+          ) : auditLogsList.length === 0 ? (
+            <p className="text-xs text-slate-500 text-center py-8">
+              No audit logs recorded for this organization under{" "}
+              {activeAuditTab} ledger.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                    <th className="pb-3">Action / Event</th>
+                    <th className="pb-3">Executed By</th>
+                    <th className="pb-3">Timestamp</th>
+                    <th className="pb-3 text-right">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {auditLogsList.map((log) => {
+                    const isExpanded = expandedLogId === log.id;
+                    const meta = log.metadata || {};
+                    const actor =
+                      meta.performedBy || log.user?.email || "System Engine";
+
+                    return (
+                      <tr
+                        key={log.id}
+                        className="hover:bg-slate-800/20 transition-colors"
+                      >
+                        <td className="py-3 font-semibold text-slate-200">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${getActionBadgeColor(
+                              log.action,
+                            )}`}
+                          >
+                            {String(log.action || "EVENT").replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="py-3 font-mono text-slate-300 text-[11px]">
+                          {actor}
+                        </td>
+                        <td className="py-3 text-slate-400 font-mono text-[11px]">
+                          {log.createdAt
+                            ? new Date(log.createdAt).toLocaleString()
+                            : "N/A"}
+                        </td>
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() =>
+                              setExpandedLogId(isExpanded ? null : log.id)
+                            }
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-950 border border-slate-800 hover:border-purple-500 text-slate-400 hover:text-white rounded-lg text-[10px] font-mono cursor-pointer transition-all"
+                          >
+                            <Code size={11} /> {isExpanded ? "Hide" : "Inspect"}
+                          </button>
+                          {isExpanded && (
+                            <div className="text-left bg-slate-950 border border-slate-800 p-3 rounded-xl mt-2 w-full max-w-sm ml-auto overflow-x-auto shadow-xl">
+                              <pre className="text-[10px] text-purple-300 font-mono">
+                                {JSON.stringify(meta, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Provision User Modal */}
