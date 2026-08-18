@@ -72,11 +72,22 @@ export default function TenantDetailPage() {
     tenantResponse ||
     {};
 
+  // Supports { success: true, addons: [...] }, { data: { addons: [...] } }, or array
   const rawAddons =
-    addonsResponse?.data?.addons || addonsResponse?.data || addonsResponse;
+    addonsResponse?.addons ||
+    addonsResponse?.data?.addons ||
+    addonsResponse?.data ||
+    addonsResponse ||
+    [];
   const globalAddons = Array.isArray(rawAddons) ? rawAddons : [];
 
-  const sequences = Array.isArray(tenant?.sequences) ? tenant.sequences : [];
+  // Support both 'voucherSequences' and 'sequences' keys safely from backend
+  const sequences = Array.isArray(tenant?.voucherSequences)
+    ? tenant.voucherSequences
+    : Array.isArray(tenant?.sequences)
+      ? tenant.sequences
+      : [];
+
   const tenantUsers = Array.isArray(tenant?.users) ? tenant.users : [];
   const activeEntitlements = Array.isArray(tenant?.entitlements)
     ? tenant.entitlements
@@ -149,12 +160,17 @@ export default function TenantDetailPage() {
   };
 
   const isAddonAssigned = (slug) => {
+    if (!slug) return false;
     return activeEntitlements.some((ent) => {
       const entSlug =
         typeof ent === "string"
           ? ent
           : ent?.addon?.slug || ent?.addonSlug || ent?.slug;
-      return entSlug === slug;
+      return (
+        String(entSlug || "")
+          .trim()
+          .toUpperCase() === String(slug).trim().toUpperCase()
+      );
     });
   };
 
@@ -324,24 +340,36 @@ export default function TenantDetailPage() {
                   No active sequence trackers found.
                 </p>
               ) : (
-                sequences.map((seq, index) => (
-                  <div
-                    key={seq.id || index}
-                    className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4"
-                  >
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                      {String(seq.type || "SEQUENCE").replace("_", " ")}
-                    </span>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-200 font-mono font-bold">
-                        Prefix: {String(seq.prefix || "")}
+                sequences.map((seq, index) => {
+                  const typeStr = String(seq.type || "SEQUENCE").toUpperCase();
+                  const prefixStr =
+                    seq.prefix ||
+                    `${typeStr}-${seq.year || new Date().getFullYear()}-`;
+                  const nextNum = (Number(seq.lastNumber) || 0) + 1;
+
+                  return (
+                    <div
+                      key={seq.id || index}
+                      className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4"
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        {typeStr === "PV"
+                          ? "Payment Voucher (PV)"
+                          : typeStr === "CV"
+                            ? "Cheque Voucher (CV)"
+                            : typeStr}
                       </span>
-                      <span className="text-purple-400 font-mono text-[11px] bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
-                        Next: #{String(seq.nextNumber ?? 1)}
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-200 font-mono font-bold">
+                          Prefix: {prefixStr}
+                        </span>
+                        <span className="text-purple-400 font-mono text-[11px] bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+                          Next: #{nextNum}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
