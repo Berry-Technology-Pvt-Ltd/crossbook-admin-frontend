@@ -20,10 +20,13 @@ import {
 
 // API Fetchers
 const fetchAuditLogs = async (tenantId, action, page) => {
+  // 💡 FIX 1: Trim spaces and normalize spaces to underscores for flexible action searching
+  const cleanAction = action ? action.trim().replace(/\s+/g, "_") : undefined;
+
   const res = await adminClient.get("/admin/audit-logs", {
     params: {
       tenantId: tenantId || undefined,
-      action: action || undefined,
+      action: cleanAction || undefined,
       page,
       limit: 15,
     },
@@ -213,6 +216,13 @@ export default function AuditLogsPage() {
                     const actor =
                       meta.performedBy || log.user?.email || "System Engine";
 
+                    // 💡 FIX 2: Check all possible timestamp properties from backend
+                    const rawTimestamp =
+                      log.createdAt ||
+                      log.created_at ||
+                      log.timestamp ||
+                      meta.timestamp;
+
                     return (
                       <tr
                         key={log.id}
@@ -252,8 +262,8 @@ export default function AuditLogsPage() {
                           <div className="flex items-center gap-1.5">
                             <Clock size={12} className="text-slate-500" />
                             <span>
-                              {log.createdAt
-                                ? new Date(log.createdAt).toLocaleString()
+                              {rawTimestamp
+                                ? new Date(rawTimestamp).toLocaleString()
                                 : "N/A"}
                             </span>
                           </div>
