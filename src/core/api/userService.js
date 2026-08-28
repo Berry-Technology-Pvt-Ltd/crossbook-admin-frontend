@@ -33,6 +33,14 @@ export const assignUserToTenant = async (data) => {
   return response.data;
 };
 
+export const updateMembership = async (membershipId, data) => {
+  const response = await adminClient.patch(
+    `/admin/users/memberships/${membershipId}`,
+    data,
+  );
+  return response.data;
+};
+
 /**
  * Update global account status (ACTIVE, SUSPENDED, INACTIVE).
  */
@@ -40,6 +48,11 @@ export const updateUserStatus = async (id, status) => {
   const response = await adminClient.patch(`/admin/users/${id}/status`, {
     status,
   });
+  return response.data;
+};
+
+export const updateUser = async (id, data) => {
+  const response = await adminClient.patch(`/admin/users/${id}`, data);
   return response.data;
 };
 

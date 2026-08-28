@@ -244,7 +244,9 @@ export default function UsersDirectoryPage() {
                           </div>
                           <div className="min-w-0">
                             <div className="truncate font-semibold text-slate-100 group-hover:text-purple-300 transition-colors">
-                              {usr.fullName || usr.email?.split("@")[0]}
+                              {usr.name ||
+                                usr.fullName ||
+                                usr.email?.split("@")[0]}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono truncate">
                               {usr.email}

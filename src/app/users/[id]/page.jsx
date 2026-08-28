@@ -6,8 +6,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserById,
   assignUserToTenant,
+  updateMembership,
   revokeMembership,
+  updateUser,
 } from "../../../core/api/userService";
+import UserPermissionMatrix from "../../../components/UserPermissionMatrix";
 import { getTenants } from "../../../core/api/tenantService";
 import AdminSidebar from "../../../shared/components/AdminSidebar";
 import {
@@ -20,6 +23,7 @@ import {
   Mail,
   Calendar,
   Layers,
+  Pencil,
   CheckCircle2,
   X,
   AlertTriangle,
@@ -33,6 +37,10 @@ export default function UserDetailPage() {
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [targetTenantId, setTargetTenantId] = useState("");
   const [targetRole, setTargetRole] = useState("ACCOUNTANT");
+  const [targetPermissions, setTargetPermissions] = useState([]);
+  const [targetIsAdmin, setTargetIsAdmin] = useState(false);
+  const [editingMembership, setEditingMembership] = useState(null);
+  const [editedName, setEditedName] = useState("");
 
   // Fetch User Details & Memberships
   const { data, isLoading, isError, error } = useQuery({
@@ -54,12 +62,16 @@ export default function UserDetailPage() {
         userId: id,
         tenantId: targetTenantId,
         role: targetRole,
+        permissions: targetPermissions,
+        isAdmin: targetIsAdmin,
       });
     },
     onSuccess: () => {
       toast.success("Workspace assigned successfully!");
       setIsAssignModalOpen(false);
       setTargetTenantId("");
+      setTargetPermissions([]);
+      setTargetIsAdmin(false);
       queryClient.invalidateQueries(["admin-user-detail", id]);
       queryClient.invalidateQueries(["admin-users"]);
     },
@@ -89,6 +101,33 @@ export default function UserDetailPage() {
           "Failed to revoke access.",
       );
     },
+  });
+
+  const updateMembershipMutation = useMutation({
+    mutationFn: ({ membershipId, permissions, isAdmin }) =>
+      updateMembership(membershipId, { permissions, isAdmin }),
+    onSuccess: () => {
+      toast.success("Workspace permissions updated successfully.");
+      setEditingMembership(null);
+      queryClient.invalidateQueries(["admin-user-detail", id]);
+      queryClient.invalidateQueries(["admin-users"]);
+    },
+    onError: (err) => {
+      toast.error(
+        err.response?.data?.error || "Failed to update workspace permissions.",
+      );
+    },
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: () => updateUser(id, { name: editedName }),
+    onSuccess: () => {
+      toast.success("User name updated successfully.");
+      queryClient.invalidateQueries(["admin-user-detail", id]);
+      queryClient.invalidateQueries(["admin-users"]);
+    },
+    onError: (err) =>
+      toast.error(err.response?.data?.error || "Failed to update user name."),
   });
 
   if (isLoading) {
@@ -155,12 +194,36 @@ export default function UserDetailPage() {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-black text-white tracking-tight">
-                  {resolvedUser?.fullName || resolvedUser?.email?.split("@")[0]}
+                  {resolvedUser?.name ||
+                    resolvedUser?.fullName ||
+                    resolvedUser?.email?.split("@")[0]}
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   {resolvedUser?.status || "ACTIVE"}
                 </span>
               </div>
+              <form
+                className="mt-3 flex max-w-md gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  updateUserMutation.mutate();
+                }}
+              >
+                <input
+                  value={editedName || resolvedUser?.name || ""}
+                  onChange={(event) => setEditedName(event.target.value)}
+                  placeholder="Full Name"
+                  aria-label="Full Name"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
+                />
+                <button
+                  type="submit"
+                  disabled={updateUserMutation.isPending}
+                  className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {updateUserMutation.isPending ? "Saving..." : "Save Name"}
+                </button>
+              </form>
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 mt-2 font-mono">
                 <span className="flex items-center gap-1.5">
                   <Mail size={13} /> {resolvedUser?.email}
@@ -199,7 +262,7 @@ export default function UserDetailPage() {
                   <th className="p-4 pl-6">Organization / Tenant</th>
                   <th className="p-4">Scoped Role</th>
                   <th className="p-4">Membership Status</th>
-                  <th className="p-4 text-right pr-6">Revoke</th>
+                  <th className="p-4 text-right pr-6">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-sm">
@@ -243,14 +306,27 @@ export default function UserDetailPage() {
                       </td>
 
                       <td className="p-4 text-right pr-6">
-                        <button
-                          onClick={() => revokeMembershipMutation.mutate(m.id)}
-                          disabled={revokeMembershipMutation.isPending}
-                          className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-all cursor-pointer"
-                          title="Revoke Tenant Access"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingMembership(m);
+                            }}
+                            className="p-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/20 rounded-xl transition-all cursor-pointer"
+                            title="Edit Workspace Permissions"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              revokeMembershipMutation.mutate(m.id)
+                            }
+                            disabled={revokeMembershipMutation.isPending}
+                            className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-all cursor-pointer"
+                            title="Revoke Tenant Access"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -259,6 +335,69 @@ export default function UserDetailPage() {
             </table>
           </div>
         </div>
+
+        {editingMembership && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-2">
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase italic">
+                    Edit Membership
+                  </h3>
+                  <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mt-0.5">
+                    {editingMembership.tenant?.companyName || "Workspace"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditingMembership(null)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <UserPermissionMatrix
+                permissions={editingMembership.permissions || []}
+                isAdmin={editingMembership.isAdmin === true}
+                onPermissionsChange={(permissions) =>
+                  setEditingMembership((current) => ({
+                    ...current,
+                    permissions,
+                  }))
+                }
+                onIsAdminChange={(isAdmin) =>
+                  setEditingMembership((current) => ({ ...current, isAdmin }))
+                }
+              />
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800 mt-4">
+                <button
+                  onClick={() => setEditingMembership(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    updateMembershipMutation.mutate({
+                      membershipId: editingMembership.id,
+                      permissions: editingMembership.permissions || [],
+                      isAdmin: editingMembership.isAdmin === true,
+                    })
+                  }
+                  disabled={updateMembershipMutation.isPending}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer"
+                >
+                  {updateMembershipMutation.isPending && (
+                    <Loader2 size={14} className="animate-spin" />
+                  )}
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Assign Modal */}
         {isAssignModalOpen && (
@@ -320,6 +459,13 @@ export default function UserDetailPage() {
                     <option value="VIEWER">VIEWER</option>
                   </select>
                 </div>
+
+                <UserPermissionMatrix
+                  permissions={targetPermissions}
+                  isAdmin={targetIsAdmin}
+                  onPermissionsChange={setTargetPermissions}
+                  onIsAdminChange={setTargetIsAdmin}
+                />
 
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
                   <button
