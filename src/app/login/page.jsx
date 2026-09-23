@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { adminClient } from "../../core/api/adminClient";
+import { adminClient, clearAdminSession } from "../../core/api/adminClient";
 import { ShieldAlert, Lock, Mail, Loader2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +17,8 @@ export default function AdminLoginPage() {
   const handleAdminLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+
+    clearAdminSession();
 
     console.log("🚀 Attempting Admin Authentication...");
 

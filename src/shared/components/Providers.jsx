@@ -4,6 +4,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { Toaster } from "sonner";
+import AdminAuthGuard from "../../core/guards/AdminAuthGuard";
 
 export default function Providers({ children }) {
   const [queryClient] = useState(
@@ -20,7 +21,7 @@ export default function Providers({ children }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <AdminAuthGuard>{children}</AdminAuthGuard>
       <Toaster position="top-right" richColors theme="dark" />
     </QueryClientProvider>
   );

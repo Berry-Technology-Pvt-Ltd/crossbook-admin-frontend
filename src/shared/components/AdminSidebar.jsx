@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAdminAuthStore } from "../../core/store/useAdminStore";
 import {
   LayoutDashboard,
   Building2,
@@ -23,6 +24,12 @@ const adminNavItems = [
 
 export default function AdminSidebar() {
   const pathname = usePathname();
+  const clearAuth = useAdminAuthStore((state) => state.clearAuth);
+
+  const handleLogout = () => {
+    clearAuth();
+    window.location.href = "/login";
+  };
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col h-screen sticky top-0 border-r border-slate-800">
@@ -57,10 +64,7 @@ export default function AdminSidebar() {
 
       <div className="p-4 border-t border-slate-800">
         <button
-          onClick={() => {
-            localStorage.clear();
-            window.location.href = "/login";
-          }}
+          onClick={handleLogout}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-rose-400 hover:bg-rose-500/10 font-bold text-xs uppercase tracking-wider transition-all"
         >
           <LogOut size={18} />

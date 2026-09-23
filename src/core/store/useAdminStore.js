@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { adminClient } from "@/core/api/adminClient";
+import { adminClient, clearAdminSession } from "../api/adminClient";
 
 export const useAdminAuthStore = create((set) => ({
   adminUser: null,
@@ -34,7 +34,9 @@ export const useAdminAuthStore = create((set) => ({
         isLoading: false,
       });
     } catch (error) {
+      clearAdminSession();
       set({ adminUser: null, isAuthenticated: false, isLoading: false });
+      throw error;
     }
   },
 
@@ -43,7 +45,13 @@ export const useAdminAuthStore = create((set) => ({
     try {
       await adminClient.post("/admin/auth/logout");
     } finally {
+      clearAdminSession();
       set({ adminUser: null, isAuthenticated: false });
     }
+  },
+
+  clearAuth: () => {
+    clearAdminSession();
+    set({ adminUser: null, isAuthenticated: false, isLoading: false });
   },
 }));
