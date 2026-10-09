@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { adminClient } from "../../core/api/adminClient";
 import AdminSidebar from "../../shared/components/AdminSidebar";
 import {
@@ -16,10 +17,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Code,
+  Download,
+  CalendarRange,
 } from "lucide-react";
 
 // API Fetchers
-const fetchAuditLogs = async (tenantId, action, page) => {
+const fetchAuditLogs = async (tenantId, action, page, startDate, endDate) => {
   // 💡 FIX 1: Trim spaces and normalize spaces to underscores for flexible action searching
   const cleanAction = action ? action.trim().replace(/\s+/g, "_") : undefined;
 
@@ -29,9 +32,29 @@ const fetchAuditLogs = async (tenantId, action, page) => {
       action: cleanAction || undefined,
       page,
       limit: 15,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
     },
   });
   return res.data?.data || res.data;
+};
+
+// Reads a filename out of a Content-Disposition header, falling back to a
+// sensible default if the header is missing or unparsable.
+const filenameFromContentDisposition = (headerValue, fallback) => {
+  const match = /filename="?([^";]+)"?/i.exec(headerValue || "");
+  return match?.[1] || fallback;
+};
+
+const triggerBlobDownload = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 };
 
 const fetchTenants = async () => {
@@ -44,14 +67,58 @@ const fetchTenants = async () => {
 export default function AuditLogsPage() {
   const [selectedTenant, setSelectedTenant] = useState("");
   const [selectedAction, setSelectedAction] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(1);
   const [expandedLogId, setExpandedLogId] = useState(null);
+  const [exportingFormat, setExportingFormat] = useState(null);
 
   // 1. Fetch Audit Logs Query
   const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
-    queryKey: ["admin-audit-logs", selectedTenant, selectedAction, page],
-    queryFn: () => fetchAuditLogs(selectedTenant, selectedAction, page),
+    queryKey: [
+      "admin-audit-logs",
+      selectedTenant,
+      selectedAction,
+      page,
+      startDate,
+      endDate,
+    ],
+    queryFn: () =>
+      fetchAuditLogs(selectedTenant, selectedAction, page, startDate, endDate),
   });
+
+  const handleExport = async (format) => {
+    setExportingFormat(format);
+    try {
+      const res = await adminClient.get("/admin/audit-logs/export", {
+        params: {
+          tenantId: selectedTenant || undefined,
+          action: selectedAction ? selectedAction.trim() : undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          format,
+        },
+        responseType: "blob",
+      });
+
+      const fallbackName = `audit-logs-${new Date().toISOString().slice(0, 10)}.${format}`;
+      const filename = filenameFromContentDisposition(
+        res.headers?.["content-disposition"],
+        fallbackName,
+      );
+      triggerBlobDownload(res.data, filename);
+      toast.success(`Audit log export (${format.toUpperCase()}) downloaded.`);
+    } catch (err) {
+      console.error("Audit log export failed:", err);
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to export audit logs.",
+      );
+    } finally {
+      setExportingFormat(null);
+    }
+  };
 
   // 2. Fetch Tenants for Filter Dropdown
   const { data: tenantsData } = useQuery({
@@ -112,20 +179,48 @@ export default function AuditLogsPage() {
             </p>
           </div>
 
-          <button
-            onClick={() => refetch()}
-            className="p-3 bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-slate-400 hover:text-white rounded-2xl transition-all cursor-pointer"
-            title="Refresh Logs"
-          >
-            <RefreshCw
-              size={18}
-              className={isRefetching ? "animate-spin" : ""}
-            />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExport("csv")}
+              disabled={exportingFormat !== null}
+              className="flex items-center gap-2 px-4 py-3 bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-slate-400 hover:text-white rounded-2xl transition-all cursor-pointer text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+              title="Export CSV"
+            >
+              {exportingFormat === "csv" ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Download size={16} />
+              )}
+              Export CSV
+            </button>
+            <button
+              onClick={() => handleExport("json")}
+              disabled={exportingFormat !== null}
+              className="flex items-center gap-2 px-4 py-3 bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-slate-400 hover:text-white rounded-2xl transition-all cursor-pointer text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+              title="Export JSON"
+            >
+              {exportingFormat === "json" ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Download size={16} />
+              )}
+              Export JSON
+            </button>
+            <button
+              onClick={() => refetch()}
+              className="p-3 bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-slate-400 hover:text-white rounded-2xl transition-all cursor-pointer"
+              title="Refresh Logs"
+            >
+              <RefreshCw
+                size={18}
+                className={isRefetching ? "animate-spin" : ""}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <div className="relative">
             <select
               value={selectedTenant}
@@ -161,12 +256,48 @@ export default function AuditLogsPage() {
             />
           </div>
 
-          {(selectedTenant || selectedAction) && (
+          <div className="relative">
+            <CalendarRange
+              className="absolute left-4 top-3.5 text-slate-500"
+              size={16}
+            />
+            <input
+              type="date"
+              aria-label="Start date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 pl-10 text-xs text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark]"
+            />
+          </div>
+
+          <div className="relative">
+            <CalendarRange
+              className="absolute left-4 top-3.5 text-slate-500"
+              size={16}
+            />
+            <input
+              type="date"
+              aria-label="End date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 pl-10 text-xs text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark]"
+            />
+          </div>
+
+          {(selectedTenant || selectedAction || startDate || endDate) && (
             <div className="flex items-center">
               <button
                 onClick={() => {
                   setSelectedTenant("");
                   setSelectedAction("");
+                  setStartDate("");
+                  setEndDate("");
                   setPage(1);
                 }}
                 className="px-4 py-2.5 text-xs font-bold text-slate-400 hover:text-white bg-slate-900 border border-slate-800 rounded-xl cursor-pointer"

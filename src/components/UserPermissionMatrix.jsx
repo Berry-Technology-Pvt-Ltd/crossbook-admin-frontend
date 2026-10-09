@@ -26,6 +26,18 @@ export default function UserPermissionMatrix({
     updatePermissions([...nextPermissions]);
   };
 
+  const handleIsAdminChange = (checked) => {
+    onIsAdminChange?.(checked);
+    // 🔧 FIX (Defect #39): checking "Tenant Admin" previously only hid the granular
+    // checkboxes — the underlying `permissions` array was left untouched, so a stale,
+    // non-empty selection could still be submitted alongside `isAdmin: true` with no
+    // precedence logic on either end. Clear it here so the two states can never
+    // co-exist in what gets submitted.
+    if (checked) {
+      updatePermissions([]);
+    }
+  };
+
   const toggleModule = (module) => {
     const modulePermissions = module.actions.map(
       (action) => `${module.key}:${action}`,
@@ -61,7 +73,7 @@ export default function UserPermissionMatrix({
           <input
             type="checkbox"
             checked={isAdmin}
-            onChange={(event) => onIsAdminChange?.(event.target.checked)}
+            onChange={(event) => handleIsAdminChange(event.target.checked)}
             className="h-4 w-4 accent-purple-600"
           />
           Tenant Admin

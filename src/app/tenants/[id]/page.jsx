@@ -275,8 +275,10 @@ export default function TenantDetailPage() {
 
   const currentStatus = String(tenant.status || "ACTIVE").toUpperCase();
   const isSuspended = currentStatus === "SUSPENDED";
+  const isInactive = currentStatus === "INACTIVE";
   const isExpired =
     tenant.validUntil && new Date(tenant.validUntil) < new Date();
+  const mutationsLocked = isSuspended || isInactive;
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
@@ -302,6 +304,10 @@ export default function TenantDetailPage() {
                 {isExpired ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
                     <Clock size={11} /> EXPIRED
+                  </span>
+                ) : isInactive ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                    <Ban size={11} /> OFFBOARDED
                   </span>
                 ) : isSuspended ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -335,8 +341,13 @@ export default function TenantDetailPage() {
                   isSuspended ? "ACTIVE" : "SUSPENDED",
                 )
               }
-              disabled={toggleStatusMutation.isPending}
-              className={`px-4 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl border transition-all cursor-pointer disabled:opacity-50 ${
+              disabled={toggleStatusMutation.isPending || isInactive}
+              title={
+                isInactive
+                  ? "This tenant has been offboarded and cannot be reactivated from this screen."
+                  : undefined
+              }
+              className={`px-4 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl border transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                 isSuspended
                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
                   : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
@@ -346,6 +357,17 @@ export default function TenantDetailPage() {
             </button>
           </div>
         </div>
+
+        {mutationsLocked && (
+          <div className="flex items-center gap-3 mb-8 -mt-2 px-5 py-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-400">
+            <AlertTriangle size={18} />
+            <span className="text-xs font-bold uppercase tracking-wider">
+              {isInactive
+                ? "This tenant has been offboarded. Organization-mutating actions are disabled."
+                : "This tenant is suspended. Organization-mutating actions are disabled until it is reactivated."}
+            </span>
+          </div>
+        )}
 
         {/* Top Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -508,8 +530,13 @@ export default function TenantDetailPage() {
                           ? revokeAddonMutation.mutate(addonSlug)
                           : assignAddonMutation.mutate(addonSlug)
                       }
-                      disabled={isPending || !addonSlug}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer disabled:opacity-50 ${
+                      disabled={isPending || !addonSlug || mutationsLocked}
+                      title={
+                        mutationsLocked
+                          ? "Disabled while this tenant is suspended or offboarded."
+                          : undefined
+                      }
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                         isAssigned
                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
                           : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:border-purple-500"
@@ -540,7 +567,13 @@ export default function TenantDetailPage() {
             </div>
             <button
               onClick={() => setIsAddUserModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer"
+              disabled={mutationsLocked}
+              title={
+                mutationsLocked
+                  ? "Disabled while this tenant is suspended or offboarded."
+                  : undefined
+              }
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer"
             >
               <UserPlus size={14} /> Add User
             </button>

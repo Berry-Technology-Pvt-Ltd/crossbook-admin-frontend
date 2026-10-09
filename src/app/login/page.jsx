@@ -47,9 +47,16 @@ export default function AdminLoginPage() {
       console.log("📥 Login Response Received:", res.data);
 
       if (res.status === 200 || res.data?.success) {
-        if (res.data?.token) {
-          sessionStorage.setItem("admin-token", res.data.token);
-        }
+        // 🔧 FIX (Defect #31): the backend authenticates this session via an
+        // httpOnly `admin_access_token` cookie — it never returns a bearer token
+        // in the response body. AdminAuthGuard's `hasSession` check only looks at
+        // client-storage flags (x-admin-key / admin-token), so without setting one
+        // here a successful login used to bounce straight back to /login on the
+        // very next route. This marker is never used as a real credential (the
+        // backend's admin auth middleware only checks x-admin-key or the httpOnly
+        // cookie, not the Authorization header) — it exists purely to satisfy the
+        // client-side session-presence check.
+        sessionStorage.setItem("admin-token", res.data?.token || "cookie-session");
         console.log(
           "✅ Admin Logged In Successfully! Redirecting to /overview...",
         );

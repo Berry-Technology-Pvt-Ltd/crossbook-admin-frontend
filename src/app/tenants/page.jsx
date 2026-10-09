@@ -32,6 +32,27 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// Client-side slug auto-formatting — mirrors the backend's own slugify()
+// (adminTenant.service.js) so what the user sees as "valid" here is the
+// same thing the server will accept.
+const slugify = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const DEFAULT_TENANT_FORM = {
+  companyName: "",
+  slug: "",
+  qboRealmId: "",
+  validUntil: "",
+  voucherSequencePrefix: "PV-",
+  checkSequencePrefix: "CV-",
+  initialAdminEmail: "",
+  adminPassword: "",
+};
+
 export default function TenantHubPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -41,15 +62,15 @@ export default function TenantHubPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [offboardTarget, setOffboardTarget] = useState(null);
   const [renewTarget, setRenewTarget] = useState(null);
+  const [statusChangeTarget, setStatusChangeTarget] = useState(null); // { tenant, nextStatus }
 
   // New Tenant Form State (with Optional validUntil)
-  const [formData, setFormData] = useState({
-    companyName: "",
-    qboRealmId: "",
-    validUntil: "",
-    voucherSequencePrefix: "PV-",
-    checkSequencePrefix: "CV-",
-  });
+  const [formData, setFormData] = useState(DEFAULT_TENANT_FORM);
+  // Once the user types directly into the slug field, stop auto-deriving it
+  // from companyName — otherwise their edit would get silently overwritten
+  // on the next keystroke in the Company Name field.
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [slugError, setSlugError] = useState(null);
 
   // 1. Fetch Tenants Query
   const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
@@ -69,22 +90,31 @@ export default function TenantHubPage() {
   // 2. Provision Tenant Mutation
   const createTenantMutation = useMutation({
     mutationFn: createTenant,
-    onSuccess: () => {
+    onSuccess: (response) => {
       toast.success("Tenant provisioned successfully!");
       setIsCreateModalOpen(false);
-      setFormData({
-        companyName: "",
-        qboRealmId: "",
-        validUntil: "",
-        voucherSequencePrefix: "PV-",
-        checkSequencePrefix: "CV-",
-      });
+      setFormData(DEFAULT_TENANT_FORM);
+      setSlugTouched(false);
+      setSlugError(null);
       queryClient.invalidateQueries(["admin-tenants"]);
+
+      const newTenantId = response?.data?.id;
+      if (newTenantId) {
+        router.push(`/tenants/${newTenantId}`);
+      }
     },
     onError: (err) => {
-      toast.error("Failed to provision tenant", {
-        description: err.message,
-      });
+      const code = err.response?.data?.code;
+      const message =
+        err.response?.data?.message || err.response?.data?.error || err.message;
+
+      // Surface a slug collision inline on the field itself, in addition to
+      // the toast — without touching the rest of the form's entries.
+      if (code === "SLUG_ALREADY_EXISTS") {
+        setSlugError(message);
+      }
+
+      toast.error("Failed to provision tenant", { description: message });
     },
   });
 
@@ -176,7 +206,22 @@ export default function TenantHubPage() {
       toast.error("Company Name is required");
       return;
     }
+    setSlugError(null);
     createTenantMutation.mutate(formData);
+  };
+
+  const handleCompanyNameChange = (value) => {
+    setFormData((prev) => ({
+      ...prev,
+      companyName: value,
+      slug: slugTouched ? prev.slug : slugify(value),
+    }));
+  };
+
+  const handleSlugChange = (value) => {
+    setSlugTouched(true);
+    setSlugError(null);
+    setFormData((prev) => ({ ...prev, slug: slugify(value) }));
   };
 
   return (
@@ -338,11 +383,11 @@ export default function TenantHubPage() {
                               Renew
                             </button>
 
-                            {/* Suspend / Activate Toggle */}
+                            {/* Suspend / Activate Toggle — opens a confirmation modal rather than firing immediately */}
                             <button
                               onClick={() =>
-                                toggleStatusMutation.mutate({
-                                  id: tenant.id,
+                                setStatusChangeTarget({
+                                  tenant,
                                   nextStatus: isSuspended
                                     ? "ACTIVE"
                                     : "SUSPENDED",
@@ -424,6 +469,89 @@ export default function TenantHubPage() {
           />
         )}
 
+        {/* Suspend / Reactivate Confirmation Modal */}
+        {statusChangeTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div
+              className={`bg-slate-900 border w-full max-w-md rounded-3xl p-6 shadow-2xl ${
+                statusChangeTarget.nextStatus === "ACTIVE"
+                  ? "border-emerald-500/30"
+                  : "border-amber-500/30"
+              }`}
+            >
+              <div
+                className={`flex items-center gap-3 mb-4 ${
+                  statusChangeTarget.nextStatus === "ACTIVE"
+                    ? "text-emerald-400"
+                    : "text-amber-400"
+                }`}
+              >
+                <AlertTriangle size={24} />
+                <h3 className="text-lg font-black uppercase tracking-tight">
+                  {statusChangeTarget.nextStatus === "ACTIVE"
+                    ? "Confirm Tenant Reactivation"
+                    : "Confirm Tenant Suspension"}
+                </h3>
+              </div>
+              <p className="text-sm text-slate-300 mb-6 leading-relaxed">
+                {statusChangeTarget.nextStatus === "ACTIVE" ? (
+                  <>
+                    Restore access for{" "}
+                    <strong className="text-white">
+                      {statusChangeTarget.tenant.companyName}
+                    </strong>
+                    ? Their users will immediately regain access to the
+                    workspace and all management controls will re-enable.
+                  </>
+                ) : (
+                  <>
+                    Suspend{" "}
+                    <strong className="text-white">
+                      {statusChangeTarget.tenant.companyName}
+                    </strong>
+                    ? Their users will lose access immediately and management
+                    controls will lock until reactivated.
+                  </>
+                )}
+              </p>
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStatusChangeTarget(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    toggleStatusMutation.mutate(
+                      {
+                        id: statusChangeTarget.tenant.id,
+                        nextStatus: statusChangeTarget.nextStatus,
+                      },
+                      { onSuccess: () => setStatusChangeTarget(null) },
+                    );
+                  }}
+                  disabled={toggleStatusMutation.isPending}
+                  className={`flex items-center gap-2 px-5 py-2.5 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-lg ${
+                    statusChangeTarget.nextStatus === "ACTIVE"
+                      ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30"
+                      : "bg-amber-600 hover:bg-amber-500 shadow-amber-600/30"
+                  }`}
+                >
+                  {toggleStatusMutation.isPending && (
+                    <Loader2 size={14} className="animate-spin" />
+                  )}
+                  {statusChangeTarget.nextStatus === "ACTIVE"
+                    ? "Confirm Reactivation"
+                    : "Confirm Suspension"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Provision Tenant Modal */}
         {isCreateModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -455,11 +583,39 @@ export default function TenantHubPage() {
                     required
                     placeholder="e.g. Acme Corporation"
                     value={formData.companyName}
-                    onChange={(e) =>
-                      setFormData({ ...formData, companyName: e.target.value })
-                    }
+                    onChange={(e) => handleCompanyNameChange(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Tenant Slug *
+                  </label>
+                  <input
+                    type="text"
+                    aria-label="Tenant Slug"
+                    required
+                    placeholder="e.g. acme-corporation"
+                    value={formData.slug}
+                    onChange={(e) => handleSlugChange(e.target.value)}
+                    aria-invalid={slugError ? "true" : "false"}
+                    className={`w-full bg-slate-950 border rounded-xl px-4 py-2.5 text-sm text-white font-mono focus:outline-none ${
+                      slugError
+                        ? "border-rose-500 focus:border-rose-500"
+                        : "border-slate-800 focus:border-purple-500"
+                    }`}
+                  />
+                  {slugError ? (
+                    <span className="text-[10px] text-rose-400 mt-1 block">
+                      {slugError}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Auto-generated from the company name — lowercase, dashes
+                      only. Edit to override.
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -525,6 +681,39 @@ export default function TenantHubPage() {
                         })
                       }
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 mt-3">
+                    Initial Admin User (Optional — seeds the baseline
+                    Workspace Admin role &amp; membership)
+                  </p>
+                  <div className="space-y-3">
+                    <input
+                      type="email"
+                      placeholder="admin@acme.com"
+                      value={formData.initialAdminEmail}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          initialAdminEmail: e.target.value,
+                        })
+                      }
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Initial admin password"
+                      value={formData.adminPassword}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          adminPassword: e.target.value,
+                        })
+                      }
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"
                     />
                   </div>
                 </div>
