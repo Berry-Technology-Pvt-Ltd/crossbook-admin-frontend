@@ -1,8 +1,6 @@
 import TenantDetailPage from "./TenantDetailPage";
 
-export function generateStaticParams() {
-  return [{ id: "placeholder" }];
-}
+export const runtime = "edge";
 
 export default function TenantPage() {
   return <TenantDetailPage />;
