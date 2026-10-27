@@ -37,16 +37,20 @@ import {
   CheckSquare,
   Activity,
   Code,
+  Receipt,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
 // Scoped Polymorphic Audit Fetcher
-const fetchTenantAuditLogs = async (tenantId, module) => {
+const fetchTenantAuditLogs = async (tenantId, module, page = 1, limit = 20) => {
   const res = await adminClient.get("/admin/audit-logs", {
     params: {
       tenantId,
       module,
-      limit: 20,
+      page,
+      limit,
     },
   });
   return res.data?.data || res.data;
@@ -58,8 +62,9 @@ export default function TenantDetailPage() {
   const queryClient = useQueryClient();
 
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [activeAuditTab, setActiveAuditTab] = useState("PLATFORM"); // 'PLATFORM' | 'VOUCHER' | 'CHECK'
+  const [activeAuditTab, setActiveAuditTab] = useState("PLATFORM"); // 'PLATFORM' | 'VOUCHER' | 'CHECK' | 'INVOICE'
   const [expandedLogId, setExpandedLogId] = useState(null);
+  const [auditPage, setAuditPage] = useState(1);
 
   const [userFormData, setUserFormData] = useState({
     email: "",
@@ -95,8 +100,8 @@ export default function TenantDetailPage() {
     refetch: refetchAuditLogs,
     isRefetching: isAuditRefetching,
   } = useQuery({
-    queryKey: ["admin-tenant-audit-scoped", id, activeAuditTab],
-    queryFn: () => fetchTenantAuditLogs(id, activeAuditTab),
+    queryKey: ["admin-tenant-audit-scoped", id, activeAuditTab, auditPage],
+    queryFn: () => fetchTenantAuditLogs(id, activeAuditTab, auditPage),
     enabled: !!id,
   });
 
@@ -133,6 +138,12 @@ export default function TenantDetailPage() {
     scopedAuditData?.data?.logs ||
     (Array.isArray(scopedAuditData) ? scopedAuditData : []);
   const auditLogsList = Array.isArray(rawAuditLogs) ? rawAuditLogs : [];
+  const auditPagination = scopedAuditData?.pagination ||
+    scopedAuditData?.data?.pagination || {
+      total: auditLogsList.length,
+      page: 1,
+      totalPages: 1,
+    };
 
   // Mutations
   const toggleStatusMutation = useMutation({
@@ -674,6 +685,7 @@ export default function TenantDetailPage() {
                 onClick={() => {
                   setActiveAuditTab("PLATFORM");
                   setExpandedLogId(null);
+                  setAuditPage(1);
                 }}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                   activeAuditTab === "PLATFORM"
@@ -687,6 +699,7 @@ export default function TenantDetailPage() {
                 onClick={() => {
                   setActiveAuditTab("VOUCHER");
                   setExpandedLogId(null);
+                  setAuditPage(1);
                 }}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                   activeAuditTab === "VOUCHER"
@@ -700,6 +713,7 @@ export default function TenantDetailPage() {
                 onClick={() => {
                   setActiveAuditTab("CHECK");
                   setExpandedLogId(null);
+                  setAuditPage(1);
                 }}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                   activeAuditTab === "CHECK"
@@ -708,6 +722,20 @@ export default function TenantDetailPage() {
                 }`}
               >
                 <CheckSquare size={13} /> Check Ledger
+              </button>
+              <button
+                onClick={() => {
+                  setActiveAuditTab("INVOICE");
+                  setExpandedLogId(null);
+                  setAuditPage(1);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeAuditTab === "INVOICE"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Receipt size={13} /> Invoice Ledger
               </button>
             </div>
           </div>
@@ -784,6 +812,35 @@ export default function TenantDetailPage() {
                   })}
                 </tbody>
               </table>
+
+              {auditPagination.totalPages > 1 && (
+                <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-800 text-xs text-slate-400">
+                  <span>
+                    Page {auditPagination.page} of {auditPagination.totalPages} (
+                    {auditPagination.total} records)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                      disabled={auditPage <= 1}
+                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl disabled:opacity-30 hover:text-white cursor-pointer"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        setAuditPage((p) =>
+                          Math.min(auditPagination.totalPages, p + 1),
+                        )
+                      }
+                      disabled={auditPage >= auditPagination.totalPages}
+                      className="p-2 bg-slate-950 border border-slate-800 rounded-xl disabled:opacity-30 hover:text-white cursor-pointer"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
