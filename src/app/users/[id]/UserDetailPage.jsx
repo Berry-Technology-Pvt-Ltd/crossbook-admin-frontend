@@ -11,6 +11,7 @@ import {
   updateMembership,
   revokeMembership,
   updateUser,
+  updateUserStatus,
 } from "../../../core/api/userService";
 import UserPermissionMatrix from "../../../components/UserPermissionMatrix";
 import { getTenants } from "../../../core/api/tenantService";
@@ -27,8 +28,11 @@ import {
   Layers,
   Pencil,
   CheckCircle2,
+  XCircle,
   X,
   AlertTriangle,
+  UserCheck,
+  UserX,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -106,8 +110,8 @@ export default function UserDetailPage() {
   });
 
   const updateMembershipMutation = useMutation({
-    mutationFn: ({ membershipId, permissions, isAdmin }) =>
-      updateMembership(membershipId, { permissions, isAdmin }),
+    mutationFn: ({ membershipId, permissions, isAdmin, status }) =>
+      updateMembership(membershipId, { permissions, isAdmin, status }),
     onSuccess: () => {
       toast.success("Workspace permissions updated successfully.");
       setEditingMembership(null);
@@ -117,6 +121,41 @@ export default function UserDetailPage() {
     onError: (err) => {
       toast.error(
         err.response?.data?.error || "Failed to update workspace permissions.",
+      );
+    },
+  });
+
+  // Reactivate (or suspend) a single workspace membership directly from the row.
+  const reactivateMembershipMutation = useMutation({
+    mutationFn: (membership) =>
+      updateMembership(membership.id, {
+        permissions: membership.permissions || [],
+        isAdmin: membership.isAdmin === true,
+        status: "ACTIVE",
+      }),
+    onSuccess: () => {
+      toast.success("Workspace access reactivated.");
+      queryClient.invalidateQueries(["admin-user-detail", id]);
+      queryClient.invalidateQueries(["admin-users"]);
+    },
+    onError: (err) => {
+      toast.error(
+        err.response?.data?.error || "Failed to reactivate workspace access.",
+      );
+    },
+  });
+
+  // Global Account Status Mutation
+  const toggleUserStatusMutation = useMutation({
+    mutationFn: (nextStatus) => updateUserStatus(id, nextStatus),
+    onSuccess: () => {
+      toast.success("User status updated successfully.");
+      queryClient.invalidateQueries(["admin-user-detail", id]);
+      queryClient.invalidateQueries(["admin-users"]);
+    },
+    onError: (err) => {
+      toast.error(
+        err.response?.data?.error || "Failed to update user status.",
       );
     },
   });
@@ -163,6 +202,8 @@ export default function UserDetailPage() {
 
   const resolvedUser = data?.data || data?.user || data;
   const memberships = resolvedUser?.memberships || [];
+  const userStatus = String(resolvedUser?.status || "ACTIVE").toUpperCase();
+  const isUserActive = userStatus === "ACTIVE";
   const rawTenants =
     tenantsData?.data?.data?.tenants ||
     tenantsData?.data?.tenants ||
@@ -200,8 +241,19 @@ export default function UserDetailPage() {
                     resolvedUser?.fullName ||
                     resolvedUser?.email?.split("@")[0]}
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  {resolvedUser?.status || "ACTIVE"}
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                    isUserActive
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                  }`}
+                >
+                  {isUserActive ? (
+                    <UserCheck size={11} />
+                  ) : (
+                    <UserX size={11} />
+                  )}
+                  {userStatus}
                 </span>
               </div>
               <form
@@ -240,12 +292,30 @@ export default function UserDetailPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsAssignModalOpen(true)}
-            className="flex items-center gap-2 px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white text-xs font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
-          >
-            <Plus size={16} /> Assign to Workspace
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() =>
+                toggleUserStatusMutation.mutate(
+                  isUserActive ? "INACTIVE" : "ACTIVE",
+                )
+              }
+              disabled={toggleUserStatusMutation.isPending}
+              className={`flex items-center gap-2 px-5 py-3 text-xs font-black uppercase tracking-wider rounded-2xl border transition-all cursor-pointer disabled:opacity-50 ${
+                isUserActive
+                  ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+              }`}
+            >
+              {isUserActive ? <XCircle size={16} /> : <UserCheck size={16} />}
+              {isUserActive ? "Deactivate Account" : "Activate Account"}
+            </button>
+            <button
+              onClick={() => setIsAssignModalOpen(true)}
+              className="flex items-center gap-2 px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white text-xs font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+            >
+              <Plus size={16} /> Assign to Workspace
+            </button>
+          </div>
         </div>
 
         {/* Workspace Memberships Table */}
@@ -275,7 +345,13 @@ export default function UserDetailPage() {
                     </td>
                   </tr>
                 ) : (
-                  memberships.map((m) => (
+                  memberships.map((m) => {
+                    const membershipStatus = String(
+                      m.status || "ACTIVE",
+                    ).toUpperCase();
+                    const isMembershipActive = membershipStatus === "ACTIVE";
+
+                    return (
                     <tr
                       key={m.id}
                       className="hover:bg-slate-800/30 transition-colors"
@@ -302,13 +378,36 @@ export default function UserDetailPage() {
                       </td>
 
                       <td className="p-4">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 size={11} /> {m.status || "ACTIVE"}
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                            isMembershipActive
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          }`}
+                        >
+                          {isMembershipActive ? (
+                            <CheckCircle2 size={11} />
+                          ) : (
+                            <XCircle size={11} />
+                          )}
+                          {membershipStatus}
                         </span>
                       </td>
 
                       <td className="p-4 text-right pr-6">
                         <div className="flex justify-end gap-2">
+                          {!isMembershipActive && (
+                            <button
+                              onClick={() =>
+                                reactivateMembershipMutation.mutate(m)
+                              }
+                              disabled={reactivateMembershipMutation.isPending}
+                              className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                              title="Reactivate Workspace Access"
+                            >
+                              <UserCheck size={15} />
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               setEditingMembership(m);
@@ -331,7 +430,8 @@ export default function UserDetailPage() {
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
