@@ -37,6 +37,7 @@ import {
   CheckSquare,
   Activity,
   Code,
+  Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -708,6 +709,19 @@ export default function TenantDetailPage() {
                 }`}
               >
                 <CheckSquare size={13} /> Check Ledger
+              </button>
+              <button
+                onClick={() => {
+                  setActiveAuditTab("INVOICE");
+                  setExpandedLogId(null);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeAuditTab === "INVOICE"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-900/30"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Receipt size={13} /> Invoice Ledger
               </button>
             </div>
           </div>
